@@ -1,0 +1,61 @@
+# ===============================================
+# Multimodal AI Ingestion Engine — .gitignore
+# ===============================================
+
+# --- Python bytecode & build artifacts ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Testing / coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+
+# --- Environment & secrets (API keys live here) ---
+.env
+.env.*
+!.env.example
+
+# --- Runtime data (defaults live in /tmp; these cover in-repo overrides) ---
+/uploads/
+/results/
+/data/
+logs/
+*.log
+
+# --- Model & heavy artifacts (opt-in local GGUF backbone, etc.) ---
+*.gguf
+*.safetensors
+models/
+hf_cache/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- Docker local overrides ---
+docker-compose.override.yml
+
+# --- Notebooks (keep if used; uncomment to ignore) ---
+# *.ipynb_checkpoints/
+.ipynb_checkpoints/
