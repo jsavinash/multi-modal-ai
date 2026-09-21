@@ -24,6 +24,12 @@ celery_app = Celery(
     "multimodal_ingestion",
     broker=settings.redis_url,
     backend=settings.redis_url,
+    include=[
+        "app.tasks",
+        "app.tasks_media",
+        "app.tasks_tabular",
+        "app.tasks_reasoning",
+    ],
 )
 
 celery_app.conf.update(

@@ -113,6 +113,11 @@ Container layout (see `docker-compose.yml`):
 | `redis` | — | 256m | broker + result backend |
 | `qdrant` | — | 1g | persistent volume `qdrant_storage` |
 
+The API and all workers share the named volume `ingestion_data` mounted at
+`/data` (`INGEST_UPLOAD_DIR=/data/uploads`, `INGEST_RESULT_DIR=/data/results` in
+the image) — the API streams uploads there and workers read them, so the volume
+must stay mounted on every service that runs tasks.
+
 Concurrency and per-child memory limits are declared once in `app/config.py`;
 `docker-compose.yml` only consumes them (`${INGEST_*:-default}`) and
 `app/resources.py` asserts `concurrency × child_limit ≤ container cap` at startup.
@@ -130,20 +135,41 @@ Stop with `docker compose down` (add `-v` to also drop the Qdrant volume).
 | `/api/v1/reason/query` | POST | multimodal reasoning query (Phase 4) |
 
 All ingest endpoints return `202 Accepted` with a `task_id` (async Celery dispatch).
+Progress and results are visible in the matching worker's logs; results are also
+written to the result directory (`INGEST_RESULT_DIR`, default
+`/tmp/multimodal-ingestion/results` on the host; `/data/results` inside
+containers). Uploaded files land in `INGEST_UPLOAD_DIR`.
 
 ```bash
 # Health
 curl localhost:8000/health
 
-# Document ingestion
+# Document ingestion (PDF / DOCX / TXT / MD)
 curl -F "file=@sample.pdf" localhost:8000/api/v1/documents/ingest
-# -> {"task_id": "...", "status": "queued", "filename": "sample.pdf", ...}
 
-# Media ingestion
+# Media ingestion (image / video / audio)
 curl -F "file=@photo.jpg" localhost:8000/api/v1/media/ingest
 
-# Tabular ingestion
+# Tabular ingestion (CSV / XLSX / JSON)
 curl -F "file=@telemetry.csv" localhost:8000/api/v1/tabular/ingest
+```
+
+Each ingest call returns `202 Accepted` with
+`{"task_id": "...", "status": "queued", "filename": ..., "file_size_bytes": ...}`.
+All endpoints were verified live; the matching worker then completes the task
+(check the worker's logs for `Task ... succeeded`).
+
+Quick self-test with a generated sample CSV:
+
+```bash
+printf 'timestamp,lat,lon,temperature\n2026-01-01T00:00:00Z,12.97,77.59,24.5\n' > /tmp/sample.csv
+curl -F "file=@/tmp/sample.csv" localhost:8000/api/v1/tabular/ingest
+# For media use any real JPEG/PNG; for documents any real PDF/TXT/MD.
+```
+
+Note: `curl -F "file=@..."` reads the file client-side — if the path doesn't
+exist, curl exits with code 26 without sending the request.
+
 ## 7. Smoke scripts
 
 End-to-end pipeline checks without the API (run with the venv active):
@@ -173,17 +199,16 @@ pytest -q
 
 | Symptom | Fix |
 |---|---|
+| `curl` exits with code 26 before any request | The local file doesn't exist (`file=@sample.pdf` is read client-side). Check the path/extension. |
 | API returns `503 Task queue unavailable` | Redis isn't reachable — `docker compose up -d redis`, check `INGEST_REDIS_URL`. |
 | Tasks stay `queued` forever | No worker on the target queue — start the matching `celery ... --queues=<queue>` worker. |
 | `415 Unsupported Media Type` | Magic bytes didn't match an accepted format; renamed files are rejected by design. |
+| Worker logs `Received unregistered task of type ...` | Task modules aren't loaded — the Celery app must declare `include=["app.tasks", "app.tasks_media", "app.tasks_tabular", "app.tasks_reasoning"]` (fixed in `app/celery_app.py`; don't remove it). |
+| Worker raises `Stored file not found: /data/uploads/...` (full Docker mode) | The API and workers share the `ingestion_data` named volume mounted at `/data` in `docker-compose.yml` — make sure every service mounts it. |
+| Task fails with `Unsupported format ... reached the parser` | The parser dispatch expects the `SupportedFormat` enum; `app/tasks.py` passes `fmt.fmt` from the `FormatSignature`. If reworking, keep the `.fmt` unwrap. |
 | `413 Request Entity Too Large` | File exceeds `INGEST_MAX_FILE_SIZE_BYTES` (100MB default). |
 | OCR notes `ocr_unavailable` | EasyOCR is optional and lazily imported — `pip install easyocr` if you need it. |
 | Embeddings fall back to hashes | `sentence-transformers` is optional — `pip install sentence-transformers` for MiniLM. |
 | Qdrant unavailable during indexing | The vector store spools offline and retries; ensure `docker compose up -d qdrant` runs and `INGEST_QDRANT_URL` matches. |
 | Startup warning "Container caps exceed detected host RAM" | Host RAM is below the 6.25GB container budget; lower `INGEST_*_CONCURRENCY` / child limits via `.env`. |
 
-```
-
-Task results are written to the result directory (`INGEST_RESULT_DIR`, default
-`/tmp/multimodal-ingestion/results`; `/data/results` inside containers). Uploaded
-files land in `INGEST_UPLOAD_DIR`.

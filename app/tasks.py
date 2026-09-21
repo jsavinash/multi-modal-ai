@@ -73,7 +73,7 @@ def parse_document_task(self, file_path_str: str, filename: str) -> dict:
             head = fh.read(4096)
         fmt = detect_format(head, filename)
         document_id = compute_document_id(path)
-        canonical = _parse_document(path, fmt, document_id)
+        canonical = _parse_document(path, fmt.fmt, document_id)
     except Exception as exc:  # noqa: BLE001
         logger.error("Document parsing failed", extra={
             "file_name": filename, "error": str(exc),

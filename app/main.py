@@ -26,7 +26,9 @@ from app.tasks_media import process_media_task
 from app.tasks_tabular import index_tabular_task
 from app.tasks_reasoning import reasoning_task
 from app.media.pipeline import UnsupportedMediaError as UnsupportedMediaFormatError
+from app.media.pipeline import detect_media_format
 from app.tabular.parsers import UnsupportedTabularError
+from app.tabular.parsers import detect_tabular_format
 from app.reasoning.context_manager import ContextOverflowError
 
 configure_logging()

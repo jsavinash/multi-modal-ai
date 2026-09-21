@@ -17,6 +17,8 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     environment:
       - INGEST_REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ingestion_data:/data   # shared with workers: API streams uploads here
     ports: ["8000:8000"]
     mem_limit: 512m         # FastAPI is I/O bound; uploads stream to disk, not RAM
     depends_on:
@@ -30,6 +32,8 @@ services:
       - INGEST_WORKER_CHILD_MEMORY_LIMIT_MB=${INGEST_WORKER_CHILD_MEMORY_LIMIT_MB:-1024}
       - INGEST_WORKER_MEMORY_BUDGET_MB=${INGEST_WORKER_MEMORY_BUDGET_MB:-2048}
     mem_limit: 2g           # 2 children x 1GB child limit; page-streamed parsing keeps RSS low
+    volumes:
+      - ingestion_data:/data
     depends_on:
       redis: {condition: service_healthy}
 
@@ -41,6 +45,8 @@ services:
       - INGEST_WHISPER_MODEL_SIZE=tiny
       - INGEST_WORKER_CHILD_MEMORY_LIMIT_MB=${INGEST_MEDIA_CHILD_MEMORY_LIMIT_MB:-384}   # child must fit inside the 1g cap
     mem_limit: 1g           # 2 children; whisper tiny int8 (~200MB each) + 512px frame buffers
+    volumes:
+      - ingestion_data:/data
     depends_on:
       redis: {condition: service_healthy}
 
@@ -52,6 +58,8 @@ services:
       - INGEST_QDRANT_URL=http://qdrant:6333
       - INGEST_WORKER_CHILD_MEMORY_LIMIT_MB=${INGEST_INDEX_CHILD_MEMORY_LIMIT_MB:-768}   # single child fits the 1g cap
     mem_limit: 1g           # 1 child; MiniLM ~90MB; Qdrant offloads vector math
+    volumes:
+      - ingestion_data:/data
     depends_on:
       redis: {condition: service_healthy}
 
@@ -72,8 +80,11 @@ services:
       - INGEST_ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - INGEST_WORKER_CHILD_MEMORY_LIMIT_MB=${INGEST_REASONING_CHILD_MEMORY_LIMIT_MB:-512}  # child must fit the 512m cap
     mem_limit: 512m         # cloud I/O bound; local GGUF opt-in must NOT run on this host
+    volumes:
+      - ingestion_data:/data
     depends_on:
       redis: {condition: service_healthy}
 
 volumes:
   qdrant_storage:
+  ingestion_data:
