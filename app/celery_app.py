@@ -6,12 +6,19 @@ from celery import Celery
 from kombu import Queue
 
 from app.config import settings
-from app.resources import detect_system_resources, clamp_worker_memory
+from app.resources import (
+    clamp_worker_memory,
+    detect_system_resources,
+    validate_capacity_plan,
+)
 
 logger = logging.getLogger(__name__)
 
 _resources = detect_system_resources()
-_effective_child_limit_mb = clamp_worker_memory(settings.worker_child_memory_limit_mb, _resources)
+# Child limit clamped by BOTH the declared worker budget and the detected host RAM.
+_effective_child_limit_mb = clamp_worker_memory(
+    settings.worker_child_memory_limit_mb, _resources, settings.worker_memory_budget_mb
+)
 
 celery_app = Celery(
     "multimodal_ingestion",
@@ -48,3 +55,6 @@ logger.info(
         "effective_child_memory_limit_mb": _effective_child_limit_mb,
     },
 )
+
+# Assert the deployment invariant for every queue on the detected host.
+validate_capacity_plan(settings, _resources)

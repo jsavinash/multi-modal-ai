@@ -71,8 +71,9 @@ Error codes: `413` (size ceiling), `415` (unknown/empty media), `507` (disk floo
 | Strict 30 s audio windows | `[(0,30),(30,60),(60,75)]` slicing of the PCM stream | `test_audio_windows_and_resample` |
 | 1 fps video sampling | `sample_frames()` — `interval = round(fps / 1.0)` | smoke (`scripts/smoke_media.py`) |
 | VRAM/cache cleanup | `DeviceManager.inference_session()` (`try/finally` → MPS/CUDA `empty_cache` + `gc.collect()`) around every model batch | code path in OCR + ASR |
+| Accelerator policy | `resolve_compute_device()` prefers **CUDA → MPS → CPU**; `select_inference_device()` (used by embeddings + OCR) refuses the accelerator below `accelerator_min_host_memory_mb` (16 GB) because MPS allocates from the same unified RAM the container caps are carved from. `ocr_gpu_enabled()` is CUDA-only — EasyOCR has no Metal backend, so an MPS host must build the Reader on CPU | `tests/test_devices.py`, `scripts/smoke_device.py` |
 | Explicit timeouts | ffmpeg subprocess 120 s (`ffmpeg_timeout_s`); per-item 300 s via bounded `ThreadPoolExecutor` future; Celery soft/hard limits derived from `media_task_timeout_s` | pipeline + task decorators |
-| Memory footprint | one model resident per worker process (lazy singletons); whisper `tiny` int8 on CPU; media queue concurrency 2 | `docker-compose.yml` |
+| Memory footprint | one model resident per worker process (lazy singletons); whisper `tiny` int8 on CPU; media queue concurrency 2; `torch` deliberately absent from the image (590 MB disk / >384 MB overhead per child) | `docker-compose.yml`, `requirements.txt` |
 
 ## 5. Graceful Degradation
 

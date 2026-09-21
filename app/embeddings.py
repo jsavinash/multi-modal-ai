@@ -31,10 +31,13 @@ class EmbeddingEngine:
                 from sentence_transformers import SentenceTransformer  # heavy, optional
 
                 with device_manager.inference_session():
-                    self._model = SentenceTransformer(settings.embedding_model_name, device="cpu")
+                    self._model = SentenceTransformer(
+                        settings.embedding_model_name, device=self._resolve_device()
+                    )
                 self._available = True
                 logger.info("Embedding model loaded", extra={
                     "model": settings.embedding_model_name, "dim": settings.embedding_dim,
+                    "device": self._resolve_device(),
                 })
             except ImportError:
                 logger.warning("sentence-transformers not installed; using hash fallback")
@@ -43,6 +46,17 @@ class EmbeddingEngine:
                 logger.warning("Embedding model init failed", extra={"reason": str(exc)})
                 self._available = False
         return self._model
+
+    @staticmethod
+    def _resolve_device() -> str:
+        """Delegate to the shared capacity-aware device policy.
+
+        ``auto`` resolves to CUDA when present, MPS only on hosts above
+        ``accelerator_min_host_memory_mb`` (unified memory competes with the
+        container budget), otherwise CPU. Explicit requests are honoured when the
+        device exists and fall back to CPU with a warning.
+        """
+        return device_manager.select_inference_device(settings.embedding_device)
 
     @property
     def available(self) -> bool:

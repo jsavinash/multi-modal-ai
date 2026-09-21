@@ -23,6 +23,16 @@ class OcrResult:
     notes: list[str]
 
 
+def ocr_gpu_enabled() -> bool:
+    """Whether EasyOCR may be constructed with ``gpu=True``.
+
+    EasyOCR only accelerates on CUDA/Metal *via torch's CUDA path*; its Metal
+    (MPS) support is not available, so on an Apple-Silicon host the reader must
+    be built on CPU even when MPS was detected as the compute device.
+    """
+    return device_manager.device == "cuda"
+
+
 def downsample(image_bytes: bytes) -> tuple[Image.Image, tuple[int, int]]:
     """Downsample an image so its longest edge is <= max_image_edge_px (bilinear).
 
@@ -52,9 +62,7 @@ class OcrRouter:
             try:
                 import easyocr  # optional heavy dependency
 
-                self._reader = easyocr.Reader(
-                    ["en"], gpu=device_manager.device in ("cuda", "mps"), verbose=False,
-                )
+                self._reader = easyocr.Reader(["en"], gpu=ocr_gpu_enabled(), verbose=False)
             except ImportError:
                 logger.warning("EasyOCR not installed; OCR disabled for this run")
                 self._reader = False  # sentinel: permanently unavailable

@@ -14,7 +14,7 @@ Central Reasoning Core & Output Optimization Layer of the Multimodal AI Ingestio
  retrieval bundles (JSON, from Phase 1-3 stores / Qdrant queries)
         │  POST /api/v1/reason/query
         ▼
- Celery queue "reasoning" ──► reasoning-worker (x1, 1g cap)
+ Celery queue "reasoning" ──► reasoning-worker (x1, 512m cap)
         │
         ▼
  app/reasoning/orchestrator.run_reasoning()

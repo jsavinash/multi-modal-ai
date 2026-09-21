@@ -15,6 +15,11 @@ Pillow>=10.0
 numpy>=1.26
 faster-whisper>=1.0          # optional at runtime: lazily imported, graceful degradation
 # optional: easyocr>=1.7     # OCR engine; lazily imported, graceful degradation when absent
+# optional: torch>=2.4        # MPS/CUDA acceleration for MiniLM + EasyOCR; ~590MB on
+#                             # disk, deliberately NOT baked into the container image:
+#                             # the media child limit is 384MB and the index cap is 1g,
+#                             # so install it only for local/dev acceleration runs.
+#                             # `pip install torch` (Apple Silicon gets MPS builds)
 # --- Phase 3: tabular / telemetry / vector indexer ---
 polars>=1.0                  # streaming tabular engine (CSV/XLSX/JSON)
 qdrant-client>=1.10          # vector DB client; lazily imported, offline spool fallback

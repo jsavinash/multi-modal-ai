@@ -9,7 +9,11 @@ from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from app.config import settings
 from app.logging_config import configure_logging
 from app.magic import UnsupportedFormatError, detect_format
-from app.resources import detect_system_resources
+from app.resources import (
+    detect_system_resources,
+    stack_container_budget_mb,
+    validate_capacity_plan,
+)
 from app.storage import (
     DiskFullError,
     FileTooLargeError,
@@ -33,18 +37,23 @@ logger = logging.getLogger(__name__)
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     ensure_dirs()
     resources = detect_system_resources()
+    stack_total_mb = stack_container_budget_mb(settings)
     logger.info("Ingestion engine starting", extra={
         "environment": settings.environment,
         "host_total_memory_mb": resources.total_memory_mb,
         "host_cpu_count": resources.cpu_count,
         "host_available_disk_mb": resources.available_disk_mb,
         "worker_memory_budget_mb": settings.worker_memory_budget_mb,
+        "total_container_budget_mb": settings.total_container_budget_mb,
     })
-    if resources.total_memory_mb < settings.worker_memory_budget_mb * 2:
+    # Assert the real deployment invariant (concurrency x child limit per queue,
+    # and the summed container caps) against the host we actually booted on.
+    validate_capacity_plan(settings, resources)
+    if stack_total_mb > resources.total_memory_mb:
         logger.warning(
-            "Host RAM is below the deployment-spec target (16GB); "
-            "worker guardrails have been clamped to detected capacity",
-            extra={"host_total_memory_mb": resources.total_memory_mb},
+            "Container caps exceed detected host RAM; the stack is oversubscribed",
+            extra={"stack_total_mb": stack_total_mb,
+                   "host_total_memory_mb": resources.total_memory_mb},
         )
     yield
 
@@ -52,7 +61,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="Multimodal AI Ingestion Engine",
     version="1.0.0",
-    description="Phase 1: document decomposition and structural text ingestion.",
+    description=(
+        "Four-phase pipeline: P1 document ingestion, P2 vision/audio/OCR, "
+        "P3 tabular telemetry + vector indexing, P4 reasoning core. "
+        "Capacity guardrails are clamped to the detected host at startup."
+    ),
     lifespan=lifespan,
 )
 
@@ -246,16 +259,6 @@ async def reason_query(
 
 class _PrefixedStream:
     """Replays the already-consumed header bytes, then proxies the upload stream."""
-
-    def __init__(self, header: bytes, upload: UploadFile) -> None:
-        self._header = header
-        self._upload = upload
-
-    def read(self, size: int = -1) -> bytes:
-        if self._header:
-            head, self._header = self._header, b""
-            return head
-        return self._upload.file.read(size)
 
     def __init__(self, header: bytes, upload: UploadFile) -> None:
         self._header = header

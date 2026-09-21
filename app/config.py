@@ -17,15 +17,41 @@ class Settings(BaseSettings):
 
     # --- Capacity guardrails (sized for an 8GB host; clamped at runtime by app/resources.py) ---
     max_file_size_bytes: int = 100 * 1024 * 1024  # strict 100MB per-file ceiling
+    # Deployment invariant: the sum of every container cap below must stay within
+    # this envelope so macOS + the Docker daemon keep ~1.75GB of the 8GB host.
+    total_container_budget_mb: int = 6400  # 6.25 GiB stack envelope
     # Per-Celery-child memory limit; the worker's total footprint is
     # concurrency * worker_child_memory_limit_mb and must stay within
-    # worker_memory_budget_mb (~50% of host RAM) so the OS, Redis and the
-    # API keep headroom.
+    # worker_memory_budget_mb so the OS, Redis and the API keep headroom.
+    # The ingestion worker is capped at 2g (2 children x 1GB), so the budget is
+    # 2048MB - the old 4096MB default exceeded the container cap and could never
+    # be honoured. Values are additionally clamped to the detected host RAM.
     worker_child_memory_limit_mb: int = 1024
-    worker_memory_budget_mb: int = 4096
-    worker_max_tasks_per_child: int = 20  # proactive child recycling
+    worker_memory_budget_mb: int = 2048
+    worker_max_tasks_per_child: int = 20  # proactive child recycling (ingestion)
+    media_max_tasks_per_child: int = 10   # media children hold OCR/ASR models: recycle sooner
     stream_chunk_size_bytes: int = 1024 * 1024  # 1MB stream chunks for uploads/IO
     min_free_disk_mb: int = 2048  # refuse new uploads below 2GB free disk
+
+    # --- Per-queue concurrency (single source of truth; docker-compose consumes these) ---
+    # Worst-case footprint per queue = concurrency * that queue's child memory limit.
+    ingestion_concurrency: int = 2
+    index_concurrency: int = 1     # 1 x 768MB child inside the 1g cap
+    reasoning_concurrency: int = 1  # cloud I/O bound; 1 child inside the 512m cap
+
+    # --- Per-queue child memory limits (each worker container overrides its own via env) ---
+    media_child_memory_limit_mb: int = 384  # whisper tiny int8 + 512px frame buffers
+    index_child_memory_limit_mb: int = 768  # MiniLM ~90MB + polars batch buffers
+    reasoning_child_memory_limit_mb: int = 512  # pinned to the 512m cap: cloud I/O bound
+
+    # --- Container caps: used at startup to validate the plan against the budget ---
+    ingestion_container_cap_mb: int = 2048   # worker: 2 children x 1GB
+    media_container_cap_mb: int = 1024       # media-worker: 2 children x 384MB + parent
+    index_container_cap_mb: int = 1024       # index-worker: 1 child x 768MB + parent
+    reasoning_container_cap_mb: int = 512    # reasoning-worker: cloud I/O bound
+    api_container_cap_mb: int = 512          # FastAPI streams uploads to disk
+    qdrant_container_cap_mb: int = 1024      # dedicated vector DB
+    redis_container_cap_mb: int = 256        # broker + result backend
 
     # --- Storage ---
     upload_dir: Path = Path("/tmp/multimodal-ingestion/uploads")
@@ -52,12 +78,19 @@ class Settings(BaseSettings):
     ocr_confidence_threshold: float = 0.35  # gates OCR text attachment
     media_task_timeout_s: int = 300         # per-item processing timeout
     ffmpeg_timeout_s: int = 120             # subprocess timeout for MP3/other containers
-    media_concurrency: int = 2              # keep worker footprint modest on 8GB host
+    media_concurrency: int = 2              # media queue children (capacity plan input)
 
     # --- Phase 3: tabular / telemetry / vector indexer ---
     index_task_queue: str = "index"         # dedicated Phase 3 Celery queue
     embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_dim: int = 384                # MiniLM output size
+    # "auto" picks the best accelerator the host can actually afford: CUDA first
+    # (dedicated VRAM), then MPS only when host RAM clears the threshold below
+    # (unified memory shares the pool the container budget is carved from).
+    # Force a device with INGEST_EMBEDDING_DEVICE=cpu|mps|cuda; unavailable
+    # requests fall back to CPU with a warning. Torch is required for mps/cuda.
+    embedding_device: str = "auto"
+    accelerator_min_host_memory_mb: int = 16384  # MPS allowed only on 16GB+ hosts
     upsert_batch_size: int = 64             # vectors per batch upsert (per spec)
     qdrant_url: str = "http://localhost:6333"
     qdrant_timeout_s: float = 10.0

@@ -15,7 +15,7 @@ Ingestion Engine.
  HTTP upload (CSV/XLSX/JSON)
         │  /api/v1/tabular/ingest  (magic-byte sniff + streamed storage)
         ▼
- Celery queue "index"  ──►  index-worker (x2 children, 2GB cap)
+ Celery queue "index"  ──►  index-worker (x1 child, 1g cap)
         │
         ▼
  app/tabular/indexing.run_indexing()
@@ -35,7 +35,7 @@ Ingestion Engine.
 | `app/tabular/parsers.py` | 177 | Magic-byte detection (CSV/XLSX/JSON), Polars parsing, Semantic Matrix Serialization |
 | `app/tabular/telemetry.py` | 74 | Min-max scaling of numeric columns, GPS detection, scaling-range tracking |
 | `app/tabular/indexing.py` | 102 | Full pipeline orchestration: parse → serialize → scale → embed → store/spool |
-| `app/embeddings.py` | 89 | Lazy MiniLM (384-dim, normalized); deterministic hash fallback; 256-row batch cap |
+| `app/embeddings.py` | 110 | Lazy MiniLM (384-dim, normalized); configurable device (`INGEST_EMBEDDING_DEVICE`, CPU default); deterministic hash fallback; 256-row batch cap |
 | `app/vector_schema.py` | 80 | Modality collections map, `IndexPayload`, `validate_payload_for_collection()` |
 | `app/vector_store.py` | 142 | Pooled Qdrant client, exponential-backoff retries, collection+index init, 64-batch upserts, offline spool |
 | `app/tasks_tabular.py` | 52 | Celery task `tabular.index` on the `index` queue |
@@ -136,7 +136,7 @@ Raw rows are **never embedded**. Column-name heuristics detect table shape
 docker compose up --build   # redis + api + ingestion/media/index workers + qdrant:6333
 
 # dedicated index worker (local dev)
-celery -A app.celery_app.celery_app worker -l INFO --queues=index --concurrency=2
+celery -A app.celery_app.celery_app worker -l INFO --queues=index --concurrency=1
 
 curl -F "file=@telemetry.csv" localhost:8000/api/v1/tabular/ingest
 

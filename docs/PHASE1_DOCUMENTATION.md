@@ -57,17 +57,23 @@ Multimodal AI Ingestion Engine: **Document Decomposition & Structural Text Inges
 | `app/parser/pdf_parser.py` | 211 | Layout-aware PDF decomposition (structural tagging + image extraction) |
 | `app/parser/docx_text_parser.py` | 83 | DOCX heading/body parsing; TXT/MD windowed stream reading |
 | `app/parser/chunker.py` | 92 | Recursive character splitter, 512-token target, 10% overlap |
-| `app/celery_app.py` | 44 | Celery config: queues, time limits, memory guardrails clamped to host RAM |
-| `app/config.py` | 54 | Typed settings via `pydantic-settings` (`INGEST_` env prefix) |
+| `app/celery_app.py` | 60 | Celery config: queues, time limits, memory guardrails clamped to host RAM + declared budget |
+| `app/config.py` | 122 | Typed settings via `pydantic-settings` (`INGEST_` env prefix); single source of truth for the capacity plan |
 | `app/logging_config.py` | 44 | Single-line JSON `Formatter`, third-party logger silencing |
-| `app/resources.py` | 87 | Runtime host probe (RAM/CPU/disk); clamps worker guardrails to actual hardware |
+| `app/resources.py` | 238 | Runtime host probe (RAM/CPU/disk); budget-aware clamping + per-queue capacity plan validation |
 
-**Host adaptation:** guardrails are no longer hard-coded to a 16 GB spec. At startup,
+**Host adaptation:** guardrails are no longer hard-coded to a target spec. At startup,
 `app/resources.py` probes total RAM (macOS `sysctl hw.memsize`, Linux `/proc/meminfo`),
-CPU count and free disk; `clamp_worker_memory` caps the per-child Celery limit to ~50 %
-of detected RAM (floor 256 MB). The current development host (8 GB / 8-core Apple M1 /
-~348 GB free disk) therefore runs a 4 × 1 GB worker budget, and the same image scales up
-unchanged on 16 GB+ production machines.
+CPU count and free disk; `clamp_worker_memory` caps the per-child Celery limit to the
+**lower** of the declared budget (`INGEST_WORKER_MEMORY_BUDGET_MB`, i.e. this queue's
+container cap) and ~50 % of detected RAM (floor 256 MB).
+`validate_capacity_plan()` then asserts `concurrency × child_limit ≤ container cap` for
+all four queues and that the summed caps fit `INGEST_TOTAL_CONTAINER_BUDGET_MB`
+(6400 MB), logging each verdict — call it from the API lifespan and the Celery
+bootstrap. The current development host (8 GB / 8-core Apple M1 / ~346 GB free disk,
+measured) therefore runs 2 × 1024 MB ingestion, 2 × 384 MB media, 1 × 768 MB index and
+1 × 512 MB reasoning children inside a 6.25 GB total stack envelope, and the same image
+scales up unchanged on 16 GB+ production machines.
 
 ## 3. API Reference
 
@@ -139,7 +145,7 @@ All settings are environment-driven with the `INGEST_` prefix (see `app/config.p
 |---|---|---|
 | `INGEST_MAX_FILE_SIZE_BYTES` | 104857600 (100 MB) | Upload ceiling |
 | `INGEST_WORKER_CHILD_MEMORY_LIMIT_MB` | 1024 | Per-Celery-child memory cap (clamped to host RAM at startup) |
-| `INGEST_WORKER_MEMORY_BUDGET_MB` | 4096 | Total worker footprint budget (~50% of the 8GB host) |
+| `INGEST_WORKER_MEMORY_BUDGET_MB` | 2048 | Ingestion worker footprint budget (= its 2g container cap); enforced alongside host-RAM clamping |
 | `INGEST_WORKER_MAX_TASKS_PER_CHILD` | 20 | Proactive child recycling |
 | `INGEST_MIN_FREE_DISK_MB` | 2048 | Refuse uploads below 2GB free disk (HTTP 507) |
 | `INGEST_UPLOAD_DIR` / `INGEST_RESULT_DIR` | `/tmp/multimodal-ingestion/{uploads,results}` | Storage paths |
@@ -192,7 +198,7 @@ celery -A app.celery_app.celery_app worker -l INFO         # worker
 curl -F "file=@sample.pdf" localhost:8000/api/v1/documents/ingest
 
 # Full stack
-docker compose up --build     # redis + api :8000 + worker (concurrency 4)
+docker compose up --build     # redis + api + 4 workers + qdrant (caps total 6.25g)
 
 # Validation
 pytest -q                                    # 33 tests (all phases)
@@ -238,3 +244,4 @@ runs **without Redis**.
 | 2026-09-21 | 2.0 | Phase 2 node added alongside Phase 1 (see [`docs/PHASE2_DOCUMENTATION.md`](PHASE2_DOCUMENTATION.md)): media ingestion API, `media` queue isolation, dedicated media-worker in compose. Phase 1 modules unchanged; test suite now 22 tests. |
 | 2026-09-21 | 3.0 | Phase 3 added (see [`docs/PHASE3_DOCUMENTATION.md`](PHASE3_DOCUMENTATION.md)): tabular ingestion API, `index` queue + index-worker + qdrant service in compose. Test suite now 33 tests. |
 | 2026-09-21 | 4.0 | Phase 4 added (see [`docs/PHASE4_DOCUMENTATION.md`](PHASE4_DOCUMENTATION.md)): reasoning core, `reasoning` queue + worker in compose. Test suite now 46 tests. |
+| 2026-09-21 | 4.1 | Resource realignment: compose caps trimmed 11g → **6.25g** (ingestion 4g→2g, media 3g→1g, index 2g→1g, api 1g→512m, reasoning 1g→512m, qdrant 1g, redis 256m); ingestion concurrency 4→2; per-worker child limits clamped (media 384 MB, index 768 MB); qdrant/redis now capped. Invariant: caps ≤ ~75 % of host RAM. |

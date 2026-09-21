@@ -11,7 +11,7 @@
 
 | Original constraint | Actual system finding | Adaptation |
 |---|---|---|
-| Local quantized Llama-3.2-Vision / Mistral-7B (4/8-bit via vLLM or bitsandbytes) | No discrete GPU; 8 GB unified RAM already budgeted to workers (1g+4g+3g+2g) | **[ADAPTED]** Local backbone is an **optional, lazily-loaded GGUF backend** (llama.cpp); never auto-loaded on this host. Cloud is the default reasoning path |
+| Local quantized Llama-3.2-Vision / Mistral-7B (4/8-bit via vLLM or bitsandbytes) | No discrete GPU; 8 GB unified RAM already committed to the container stack (ingestion 2g + media 1g + index 1g + reasoning 512m = 6.25g, ~1.75g host headroom) | **[ADAPTED]** Local backbone is an **optional, lazily-loaded GGUF backend** (llama.cpp); never auto-loaded on this host. Cloud is the default reasoning path |
 | Cloud-hybrid toggle | Host has HTTPS access to managed endpoints | Kept, made concrete: `INGEST_REASONING_BACKEND=auto\|local\|openai\|anthropic`; `auto` = local if explicitly enabled and context fits, else cloud |
 | 8k local / 32k cloud token thresholds | — | Kept exactly; tokens estimated (chars/token heuristic) with optional tiktoken refinement |
 | "Never send multi-GB payloads" | 8 GB host | **[ADAPTED]** hard byte cap on the assembled context (`INGEST_MAX_CONTEXT_BYTES`, default 2 MB) + token-budget enforcement *before* any network call |
